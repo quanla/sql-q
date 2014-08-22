@@ -1,0 +1,137 @@
+
+import java.sql.Statement;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.sql.Types;
+import java.util.LinkedList;
+import java.util.List;
+
+import $classFullName;
+import qj.tool.sql.SQLUtil;
+import qj.util.IOUtil;
+
+public class $CName|DAO {
+	// ************************
+	// *      CRUD BEGIN      *
+	// ************************
+	public static void insert($CName $cName, Connection conn) {
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		try {
+			ps = conn.prepareStatement("INSERT INTO `$cName`($fieldNames) VALUES($fieldPH)", new String[] {"id"});
+$psSet1
+			int result = ps.executeUpdate();
+			if (result != 1) {
+				throw new RuntimeException("Failed to insert record into `$cName` table");
+			}
+			
+			rs = ps.getGeneratedKeys();
+			if (rs.next()){
+			    $cName.id=rs.getLong(1);
+			}
+			
+		} catch (SQLException e) {
+			throw new RuntimeException(e);
+		} finally {
+			IOUtil.close(rs);
+			IOUtil.close(ps);
+		}
+	}
+	
+	public static void delete(Long id, Connection conn) {
+		PreparedStatement ps = null;
+		try {
+			ps = conn.prepareStatement("DELETE FROM `$cName` WHERE id=?");
+			ps.setLong(1, id);
+			
+			int result = ps.executeUpdate();
+			if (result != 1) {
+				throw new RuntimeException("Failed to delete record from `$cName` table");
+			}
+			
+		} catch (SQLException e) {
+			throw new RuntimeException(e);
+		} finally {
+			IOUtil.close(ps);
+		}
+	}
+	
+	public static void update($CName $cName, Connection conn) {
+		PreparedStatement ps = null;
+		try {
+			ps = conn.prepareStatement("UPDATE `$cName` SET $psSetUpdate WHERE id=?");
+$psSet1
+			ps.setLong($count1, $cName.id);
+
+			int result = ps.executeUpdate();
+			if (result != 1) {
+				throw new RuntimeException("Failed to update record into $CName table");
+			}
+			
+		} catch (SQLException e) {
+			throw new RuntimeException(e);
+		} finally {
+			IOUtil.close(ps);
+		}
+	}
+	
+	public static $CName select(Long id, Connection conn) {
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		try {
+			ps = conn.prepareStatement("SELECT $fieldNames FROM `$cName` WHERE id=?");
+			ps.setLong(1, id);
+
+			rs = ps.executeQuery();
+			
+			if (!rs.next()) {
+				return null;
+			}
+			$CName $cName = new $CName();
+			$cName.id = id;
+$rsSet1
+			
+			return $cName;
+			
+		} catch (SQLException e) {
+			throw new RuntimeException(e);
+		} finally {
+			IOUtil.close(rs);
+			IOUtil.close(ps);
+		}
+	}
+	
+	
+	public static List<$CName> selectAll(Connection conn) {
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		try {
+			ps = conn.prepareStatement("SELECT id, $fieldNames FROM `$cName`");
+
+			rs = ps.executeQuery();
+			
+			LinkedList<$CName> list = new LinkedList<>();
+			while (rs.next()) {
+				$CName $cName = new $CName();
+				$cName.id = rs.getLong(1);
+$rsSet2
+				list.add($cName);
+			}
+			
+			return list;
+			
+		} catch (SQLException e) {
+			throw new RuntimeException(e);
+		} finally {
+			IOUtil.close(rs);
+			IOUtil.close(ps);
+		}
+	}
+	
+	// **********************
+	// *      CRUD END      *
+	// **********************
+}
