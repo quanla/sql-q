@@ -1,44 +1,32 @@
 package qj.tool.sql;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.sql.Timestamp;
 import java.sql.Types;
-import java.util.Arrays;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 
 import qj.tool.sql.test.Aa;
 import qj.util.Cols;
 import qj.util.IOUtil;
-import qj.util.NameCaseUtil;
 import qj.util.ReflectUtil;
 import qj.util.RegexUtil;
-import qj.util.StringUtil;
 import qj.util.funct.F1;
 import qj.util.funct.F2;
+import qj.util.funct.Fs;
 import qj.util.funct.P1;
 import qj.util.funct.P3;
 
-import com.google.gson.Gson;
-
-
-
 public class Template<M> {
 	Class<M> clazz;
-	Field1<M> idField;
+	List<Field1<M>> idFields;
 	List<Field1<M>> dataFields;
+	String tableName;
 	
 	Template(Class<M> clazz) {
 		this.clazz = clazz;
@@ -48,6 +36,7 @@ public class Template<M> {
 		F2<ResultSet,Integer,Object> rsGet = null;
 		P3<PreparedStatement, Integer, Object> psSetter = null;
 		String sqlName = null;
+		Class<?> type;
 		abstract void setValue(Object val, M m);
 		abstract Object getValue(M m);
 	}
@@ -56,103 +45,26 @@ public class Template<M> {
 		return new Builder<M>(clazz);
 	}
 	
-	public static class Builder<M> {
-
-		private Class<M> clazz;
-
-		public Builder(Class<M> clazz) {
-			this.clazz = clazz;
-		}
-
-		HashSet<String> dontStore = new HashSet<String>();
-		public Template<M> build() {
-			Template<M> template = new Template<M>(clazz);
-			template.idField = field1(ReflectUtil.getField("id", clazz));
-			template.dataFields = new LinkedList<>();
-			eachField(clazz, (f) -> {
-				if (dontStore.contains(f.getName())) {
-					return;
-				}
-				template.dataFields.add(field1(f));
-			});
-			return template;
-		}
-
-		public Field1<M> field1(Field field) {
-			Field1<M> raw = field1_raw(field);
-			F1<Field1<M>, Field1<M>> decor = fieldDecors.get(field.getName());
-			if (decor != null) {
-				return decor.e(raw);
-			}
-			return raw;
-		}
-		
-		public static <M> Field1<M> field1_raw(Field field) {
-			Field1<M> field1 = new Field1<M>() {
-				@Override
-				void setValue(Object val, M m) {
-					ReflectUtil.setFieldValue(val, field, m);
-				}
-				@Override
-				Object getValue(M m) {
-					return ReflectUtil.getFieldValue(field, m);
-				}
-			};
-			field1.sqlName = NameCaseUtil.camelToHyphen(field.getName());
-			field1.psSetter = setter(field.getType());
-			field1.rsGet = rsGet(field.getType());
-			return field1;
-		}
-
-		Map<String,F1<Field1<M>,Field1<M>>> fieldDecors = new HashMap<>();
-		public Builder<M> embededList(String fieldName, Class<?> elemCLass) {
-			fieldDecors.put(fieldName, (f1) -> {
-				Field1<M> newField1 = new Field1<M>() {
-					@Override
-					void setValue(Object val, M m) {
-						if (val == null) {
-							f1.setValue(null, m);
-							return;
-						}
-						Object o = new Gson().fromJson(((String)val), ReflectUtil.forName("[L" + elemCLass.getName() + ";"));
-						f1.setValue(ReflectUtil.invokeMethod("asList", new Object[] {o}, Arrays.class), m);
-					}
-
-					@Override
-					Object getValue(M m) {
-						Object val = f1.getValue(m);
-						return new Gson().toJson(val);
-					}
-				};
-				newField1.psSetter = setter(String.class);
-				newField1.rsGet = rsGet(String.class);
-				newField1.sqlName = f1.sqlName;
-				return newField1;
-			});
-			return this;
-		}
-
-		public Builder<M> dontStore(String fieldName) {
-			dontStore.add(fieldName);
-			return this;
-		}
-	}
-
 	public void insert(M m, Connection conn) {
 		PreparedStatement ps = null;
 		ResultSet rs = null;
 		try {
-			List<Field1<M>> fields = dataFields;
-			ps = conn.prepareStatement("INSERT INTO `" + cName() + "`(" + fieldNames(fields) + ") VALUES(" + fieldsPH(fields) + ")", Statement.RETURN_GENERATED_KEYS); // new String[] {"id"}
+			boolean hasId = getId(m) != null;
+			List<Field1<M>> fields = hasId ? allFields() : dataFields;
+			String sql = "INSERT INTO `" + tableName + "`(" + fieldNames(fields) + ") VALUES(" + fieldsPH(fields) + ")";
+//			System.out.println(sql);
+			ps = conn.prepareStatement(sql, Cols.isEmpty(idFields) ? Statement.NO_GENERATED_KEYS : Statement.RETURN_GENERATED_KEYS); // new String[] {"id"}
 			psSet1(fields, m, ps);
 			int result = ps.executeUpdate();
 			if (result != 1) {
-				throw new RuntimeException("Failed to insert record into " + cName() + " table");
+				throw new RuntimeException("Failed to insert record into " + tableName + " table");
 			}
 			
-			rs = ps.getGeneratedKeys();
-			if (rs.next()){
-			    setId(m, rs.getLong(1));
+			if (!hasId && Cols.isNotEmpty(idFields)) {
+				rs = ps.getGeneratedKeys();
+				if (rs.next()){
+					setId(m, rs.getLong(1));
+				}
 			}
 			
 		} catch (SQLException e) {
@@ -163,32 +75,15 @@ public class Template<M> {
 		}
 	}
 
-	private String cName() {
-		return clazz.getSimpleName().toLowerCase();
-	}
-
 	private void setId(M m, long id) {
-		idField.setValue(id, m);
+		Cols.getSingle(idFields).setValue(id, m);
+	}
+	private Object getId(M m) {
+		Field1<M> idField = Cols.getSingle(idFields);
+		return idField != null ? idField.getValue(m) : null;
 	}
 
 
-	private void psSet1(Object[] params, PreparedStatement ps) throws SQLException {
-		int index = 1;
-		index = psSet(params, ps, index);
-	}
-
-	private int psSet(Object[] params, PreparedStatement ps, int index)
-			throws SQLException {
-		for (Object val : params) {
-			if (val == null) {
-				ps.setNull(index++, Types.INTEGER);
-			} else {
-				P3<PreparedStatement, Integer, Object> setter = setter(val.getClass());
-				setter.e(ps, index++, val);
-			}
-		}
-		return index;
-	}
 	private void psSet1(List<Field1<M>> fields, M m, PreparedStatement ps) throws SQLException {
 		int index = 1;
 		for (Field1 field : fields) {
@@ -204,51 +99,23 @@ public class Template<M> {
 		}
 	}
 
-	private static P3<PreparedStatement, Integer, Object> setter(Class<?> type) {
-		if (type.equals(Date.class)) {
-			return (ps, index, val) -> {
-				try {
-					ps.setTimestamp(index, new Timestamp(((Date)val).getTime()));
-				} catch (SQLException e) {
-					throw new RuntimeException(e);
-				}
-			};
-		}
-		if (type.equals(boolean.class)) {
-			return (ps, index, val) -> {
-				try {
-					ps.setInt(index, ((Boolean)val).booleanValue() ? 1 : 0);
-				} catch (SQLException e) {
-					throw new RuntimeException(e);
-				}
-			};
-		}
-		Method method = ReflectUtil.getMethod("set" + StringUtil.upperCaseFirstChar(type.getSimpleName()), PreparedStatement.class);
-		if (method == null) {
-			return null;
-		}
-		return (ps, index, val) -> {
-			ReflectUtil.invoke(method, ps, new Object[] {index, val});
-		};
-	}
-
 	private String fieldsPH(List<Field1<M>> fields) {
 		return Cols.join(Cols.createList(fields.size(), () -> "?"), ",");
 	}
 
 	private String fieldNames(List<Field1<M>> fields) {
-		return Cols.join(Cols.yield(fields, (f) -> f.sqlName), ",");
+		return Cols.join(Cols.yield(fields, (f) -> "`" + f.sqlName + "`"), ",");
 	}
 
-	public void delete(Connection conn, String query, Object... params) {
+	public void delete(Connection conn, String cond, Object... params) {
 		PreparedStatement ps = null;
 		try {
-			ps = conn.prepareStatement("DELETE FROM `" + cName() + "` " + query);
-			psSet1(params, ps);
+			ps = conn.prepareStatement("DELETE FROM `" + tableName + "` " + (cond != null ? cond : ""));
+			SQLUtil.psSet1(params, ps);
 			
 			int result = ps.executeUpdate();
 			if (result != 1) {
-				throw new RuntimeException("Failed to delete record from " + cName() + " table");
+				throw new RuntimeException("Failed to delete record from " + tableName + " table");
 			}
 			
 		} catch (SQLException e) {
@@ -258,15 +125,21 @@ public class Template<M> {
 		}
 	}
 	
+	/**
+	 * SET state=? WHERE id=?
+	 * @param conn
+	 * @param query
+	 * @param params
+	 */
 	public void update(Connection conn, String query, Object... params) {
 		PreparedStatement ps = null;
 		try {
-			ps = conn.prepareStatement("UPDATE `" + cName() + "` " + query);
-			psSet1(params, ps);
+			ps = conn.prepareStatement("UPDATE `" + tableName + "` " + query);
+			SQLUtil.psSet1(params, ps);
 			
 			int result = ps.executeUpdate();
 			if (result != 1) {
-				throw new RuntimeException("Failed to update record into " + cName() + " table");
+				throw new RuntimeException("Failed to update record into " + tableName + " table");
 			}
 			
 		} catch (SQLException e) {
@@ -280,13 +153,13 @@ public class Template<M> {
 		PreparedStatement ps = null;
 		try {
 			List<Field1<M>> fields = allFields();
-			ps = conn.prepareStatement("UPDATE `" + cName() + "` SET " + psSetUpdate(fields) + " " + query);
+			ps = conn.prepareStatement("UPDATE `" + tableName + "` SET " + psSetUpdate(fields) + " " + query);
 			psSet1(fields, m, ps);
-			psSet(params, ps, fields.size() + 1);
+			SQLUtil.psSet(params, ps, fields.size() + 1);
 
 			int result = ps.executeUpdate();
 			if (result != 1) {
-				throw new RuntimeException("Failed to update record into " + cName() + " table");
+				throw new RuntimeException("Failed to update record into " + tableName + " table");
 			}
 			
 		} catch (SQLException e) {
@@ -299,31 +172,20 @@ public class Template<M> {
 	private String psSetUpdate(List<Field1<M>> fields) {
 		return Cols.join(Cols.yield(fields, (f) -> f.sqlName + "=?"), ",");
 	}
+	
+	public M selectById(Object id, Connection conn) {
+		return select(conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
+	}
 
 	public M select(Connection conn, String query, Object... params) {
-		PreparedStatement ps = null;
-		ResultSet rs = null;
-		try {
-			List<Field1<M>> allFields = allFields();
-			ps = conn.prepareStatement("SELECT " + fieldNames(allFields) + " FROM `" + cName() + "` " + query);
-			psSet1(params, ps);
-
-			rs = ps.executeQuery();
-			
-			if (!rs.next()) {
-				return null;
-			}
-			M m = ReflectUtil.newInstance(clazz);
-			rsSet(allFields, m, rs);
-			
-			return m;
-			
-		} catch (SQLException e) {
-			throw new RuntimeException(e);
-		} finally {
-			IOUtil.close(rs);
-			IOUtil.close(ps);
-		}
+		Query<M> parseQuery = parseSelectQuery(query);
+		
+		AtomicReference<M> ret = new AtomicReference<M>();
+		each((F1<M, Boolean>) m -> {
+			ret.set(m);
+			return true;
+		}, conn, parseQuery.fields, (parseQuery.cond != null ? parseQuery.cond : "") + " LIMIT 1", params);
+		return ret.get();
 	}
 
 	public List<M> selectAll(Connection conn) {
@@ -334,21 +196,34 @@ public class Template<M> {
 
 	private List<M> selectList(Connection conn, List<Field1<M>> fields,
 			String cond, Object... params) {
+		LinkedList<M> list = new LinkedList<>();
+		
+		each(Fs.store(list), conn, fields, cond, params);
+		
+		return list;
+	}
+	
+	private void each(P1<M> p1, Connection conn, List<Field1<M>> fields,
+			String cond, Object... params) {
+		each(Fs.f1(p1, false), conn, fields, cond, params);
+	}
+
+	private void each(F1<M,Boolean> f1, Connection conn, List<Field1<M>> fields,
+			String cond, Object... params) {
 		PreparedStatement ps = null;
 		ResultSet rs = null;
 		try {
-			ps = conn.prepareStatement("SELECT " + fieldNames(fields) + " FROM `" + cName() + "` " + cond);
-			psSet1(params, ps);
+			ps = conn.prepareStatement("SELECT " + fieldNames(fields) + " FROM `" + tableName + "`" + (cond == null ? "" : " " + cond));
+			SQLUtil.psSet1(params, ps);
 			rs = ps.executeQuery();
 			
-			LinkedList<M> list = new LinkedList<>();
 			while (rs.next()) {
 				M m = ReflectUtil.newInstance(clazz);
 				rsSet(fields, m, rs);
-				list.add(m);
+				if (f1.e(m)) {
+					break;
+				}
 			}
-			
-			return list;
 			
 		} catch (SQLException e) {
 			throw new RuntimeException(e);
@@ -365,58 +240,21 @@ public class Template<M> {
 		}
 	}
 
-	private static F2<ResultSet,Integer,Object> rsGet(Class<?> type) {
-		if (type.equals(Date.class)) {
-			return (rs, index) -> {
-				try {
-					return rs.getTimestamp(index);
-				} catch (SQLException e) {
-					throw new RuntimeException(e);
-				}
-			};
-		}
-		
-		Method methodWasNull = ReflectUtil.getMethod("wasNull", ResultSet.class);
-		Method methodGet = ReflectUtil.getMethod("get" + StringUtil.upperCaseFirstChar(type.getSimpleName()), new Class[] {int.class}, ResultSet.class);
-		return (rs, index) -> {
-			Object val = ReflectUtil.invoke(methodGet, rs, new Object[] {index});
-			Boolean wasNull = ReflectUtil.invoke(methodWasNull, rs);
-			
-			return wasNull ? null : val;
-		};
-	}
-
 	private List<Field1<M>> allFields() {
 		LinkedList<Field1<M>> ret = new LinkedList<>();
-		ret.add(idField);
+		ret.addAll(idFields);
 		ret.addAll(dataFields);
 		return ret;
 	}
 
-	private static void eachField(Class<?> clazz, P1<Field> p1) {
-		for (final Field field : clazz.getDeclaredFields()) {
-			int modifiers = field.getModifiers();
-			if ((modifiers & (Modifier.STATIC | Modifier.FINAL | Modifier.TRANSIENT)) > 0
-					|| (modifiers & Modifier.PUBLIC) == 0
-					) {
-				continue;
-			}
-			
-			if (field.getName().equals("id")) {
-				continue;
-			}
-			p1.e(field);
-		}
-	}
-
 	public List<M> selectList(Connection conn, String query, Object... params) {
-		Query<M> parseQuery = parseQuery(query);
+		Query<M> parseQuery = parseSelectQuery(query);
 		
 		return selectList(conn, parseQuery.fields, parseQuery.cond, params);
 	}
 	
-	private Query<M> parseQuery(String query) {
-		Matcher matcher = RegexUtil.matcher("^(?i)SELECT (.+?) (?:FROM .+? )?(WHERE .+)$", query);
+	private Query<M> parseSelectQuery(String query) {
+		Matcher matcher = RegexUtil.matcher("^(?i)(?:SELECT (.+?) )?(?:FROM .+? )?(WHERE .+)?$", query);
 		if (!matcher.matches()) {
 			throw new RuntimeException("Can not parse this query: " + query);
 		}
@@ -425,10 +263,13 @@ public class Template<M> {
 	}
 	
 	public static void main(String[] args) {
-		new Template<Aa>(Aa.class).parseQuery("SELECT receiver_name, receiver_address, receiver_phone WHERE order_by=? AND deliver_time > ? ORDER BY deliver_time DESC");
+		new Template<Aa>(Aa.class).parseSelectQuery("SELECT receiver_name, receiver_address, receiver_phone WHERE order_by=? AND deliver_time > ? ORDER BY deliver_time DESC");
 	}
 
 	private List<Field1<M>> parseFields(String fields) {
+		if (fields == null) {
+			return allFields();
+		}
 		LinkedList<Field1<M>> ret = new LinkedList<>();
 		for (String sqlName : fields.split("\\s*,\\s*")) {
 			ret.add(getField(sqlName));
@@ -437,8 +278,10 @@ public class Template<M> {
 	}
 
 	private Field1<M> getField(String sqlName) {
-		if (sqlName.equals("id")) {
-			return idField;
+		for (Field1<M> field1 : idFields) {
+			if (field1.sqlName.equals(sqlName)) {
+				return field1;
+			}
 		}
 		for (Field1<M> field1 : dataFields) {
 			if (field1.sqlName.equals(sqlName)) {
@@ -456,5 +299,59 @@ public class Template<M> {
 			this.cond = cond;
 		}
 		
+	}
+
+	public boolean exists(Connection conn, String cond, Object... params) {
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		try {
+			ps = conn.prepareStatement("SELECT 1 FROM `" + tableName + "` " + cond + " LIMIT 1");
+			SQLUtil.psSet1(params, ps);
+			rs = ps.executeQuery();
+			
+			return rs.next();
+			
+		} catch (SQLException e) {
+			throw new RuntimeException(e);
+		} finally {
+			IOUtil.close(rs);
+			IOUtil.close(ps);
+		}
+	}
+
+	public void save(M m, Connection conn) {
+		Object id = getId(m);
+		if (id != null) {
+			update(conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
+		} else {
+			insert(m, conn);
+		}
+	}
+
+	public void each(P1<M> p1, Connection conn,
+			String query, Object... params) {
+		Query<M> parseQuery = parseSelectQuery(query);
+		
+		each(p1, conn, parseQuery.fields, parseQuery.cond, params);
+	}
+
+	public <IDT> F1<IDT, M> selectByIdF(Connection conn) {
+		return id -> selectById(id, conn);
+	}
+
+	public void update(M m, Connection conn) {
+		update(conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
+	}
+
+	public void delete(M m, Connection conn) {
+		delete(conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
+	}
+
+	public void deleteById(Object id, Connection conn) {
+		delete(conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
+	}
+
+	public void deleteAll(Connection conn) {
+		delete(conn, null);
 	}
 }
