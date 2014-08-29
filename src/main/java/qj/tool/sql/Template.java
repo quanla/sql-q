@@ -27,6 +27,7 @@ public class Template<M> {
 	List<Field1<M>> idFields;
 	List<Field1<M>> dataFields;
 	String tableName;
+	boolean autoIncrement = true;
 	
 	Template(Class<M> clazz) {
 		this.clazz = clazz;
@@ -149,11 +150,11 @@ public class Template<M> {
 		}
 	}
 
-	public void update(M m, Connection conn, String query, Object... params) {
+	public void update(M m, Connection conn, String cond, Object... params) {
 		PreparedStatement ps = null;
 		try {
 			List<Field1<M>> fields = allFields();
-			ps = conn.prepareStatement("UPDATE `" + tableName + "` SET " + psSetUpdate(fields) + " " + query);
+			ps = conn.prepareStatement("UPDATE `" + tableName + "` SET " + psSetUpdate(fields) + " " + cond);
 			psSet1(fields, m, ps);
 			SQLUtil.psSet(params, ps, fields.size() + 1);
 
@@ -170,11 +171,11 @@ public class Template<M> {
 	}
 
 	private String psSetUpdate(List<Field1<M>> fields) {
-		return Cols.join(Cols.yield(fields, (f) -> f.sqlName + "=?"), ",");
+		return Cols.join(Cols.yield(fields, (f) -> "`" + f.sqlName + "`=?"), ",");
 	}
 	
 	public M selectById(Object id, Connection conn) {
-		return select(conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
+		return select(conn, "WHERE `" + Cols.getSingle(idFields).sqlName + "`=?", id);
 	}
 
 	public M select(Connection conn, String query, Object... params) {
@@ -254,7 +255,7 @@ public class Template<M> {
 	}
 	
 	private Query<M> parseSelectQuery(String query) {
-		Matcher matcher = RegexUtil.matcher("^(?i)(?:SELECT (.+?) )?(?:FROM .+? )?(WHERE .+)?$", query);
+		Matcher matcher = RegexUtil.matcher("^(?i)(?:SELECT (.+?) *)?(?:FROM .+? *)?(WHERE .+)?$", query);
 		if (!matcher.matches()) {
 			throw new RuntimeException("Can not parse this query: " + query);
 		}
@@ -322,7 +323,7 @@ public class Template<M> {
 	public void save(M m, Connection conn) {
 		Object id = getId(m);
 		if (id != null) {
-			update(conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
+			update(m, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
 		} else {
 			insert(m, conn);
 		}
@@ -340,7 +341,7 @@ public class Template<M> {
 	}
 
 	public void update(M m, Connection conn) {
-		update(conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
+		update(m, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
 	}
 
 	public void delete(M m, Connection conn) {

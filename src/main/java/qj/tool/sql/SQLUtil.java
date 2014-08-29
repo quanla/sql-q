@@ -261,4 +261,15 @@ public class SQLUtil {
 		int index = 1;
 		index = psSet(params, ps, index);
 	}
+	public static void execute(String query, Connection conn) {
+		PreparedStatement ps = null;
+		try {
+			ps = conn.prepareStatement(query);
+			ps.executeUpdate();
+		} catch (SQLException e) {
+			throw new RuntimeException(e);
+		} finally {
+			IOUtil.close(ps);
+		}
+	}
 }
