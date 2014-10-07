@@ -1,5 +1,6 @@
 package qj.tool.sql;
 
+import java.lang.reflect.Type;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -32,26 +33,29 @@ public class Template<M> {
 	Template(Class<M> clazz) {
 		this.clazz = clazz;
 	}
-	
+
+
 	static abstract class Field1<M> {
 		F2<ResultSet,Integer,Object> rsGet = null;
 		P3<PreparedStatement, Integer, Object> psSetter = null;
 		String sqlName = null;
-		Class<?> type;
+		Type type;
 		abstract void setValue(Object val, M m);
 		abstract Object getValue(M m);
 	}
 
 	public static <M> Builder<M> builder(Class<M> clazz) {
-		return new Builder<M>(clazz);
+		return new Builder<>(clazz);
 	}
-	
+
 	public void insert(M m, Connection conn) {
+
+		boolean hasId = getId(m) != null;
+		List<Field1<M>> fields = hasId ? allFields() : dataFields;
+
 		PreparedStatement ps = null;
 		ResultSet rs = null;
 		try {
-			boolean hasId = getId(m) != null;
-			List<Field1<M>> fields = hasId ? allFields() : dataFields;
 			String sql = "INSERT INTO `" + tableName + "`(" + fieldNames(fields) + ") VALUES(" + fieldsPH(fields) + ")";
 //			System.out.println(sql);
 			ps = conn.prepareStatement(sql, Cols.isEmpty(idFields) ? Statement.NO_GENERATED_KEYS : Statement.RETURN_GENERATED_KEYS); // new String[] {"id"}
@@ -79,7 +83,7 @@ public class Template<M> {
 	private void setId(M m, long id) {
 		Cols.getSingle(idFields).setValue(id, m);
 	}
-	private Object getId(M m) {
+	public Object getId(M m) {
 		Field1<M> idField = Cols.getSingle(idFields);
 		return idField != null ? idField.getValue(m) : null;
 	}
@@ -89,8 +93,7 @@ public class Template<M> {
 		int index = 1;
 		for (Field1 field : fields) {
 			Object val = field.getValue(m);
-//			Object val = ReflectUtil.getFieldValue(field, m);
-			
+
 			if (val == null) {
 				ps.setNull(index++, Types.INTEGER);
 			} else {
@@ -108,16 +111,13 @@ public class Template<M> {
 		return Cols.join(Cols.yield(fields, (f) -> "`" + f.sqlName + "`"), ",");
 	}
 
-	public void delete(Connection conn, String cond, Object... params) {
+	public int delete(Connection conn, String cond, Object... params) {
 		PreparedStatement ps = null;
 		try {
 			ps = conn.prepareStatement("DELETE FROM `" + tableName + "` " + (cond != null ? cond : ""));
 			SQLUtil.psSet1(params, ps);
 			
-			int result = ps.executeUpdate();
-			if (result != 1) {
-				throw new RuntimeException("Failed to delete record from " + tableName + " table");
-			}
+			return ps.executeUpdate();
 			
 		} catch (SQLException e) {
 			throw new RuntimeException(e);
@@ -128,20 +128,14 @@ public class Template<M> {
 	
 	/**
 	 * SET state=? WHERE id=?
-	 * @param conn
-	 * @param query
-	 * @param params
 	 */
-	public void update(Connection conn, String query, Object... params) {
+	public int update(Connection conn, String query, Object... params) {
 		PreparedStatement ps = null;
 		try {
 			ps = conn.prepareStatement("UPDATE `" + tableName + "` " + query);
 			SQLUtil.psSet1(params, ps);
 			
-			int result = ps.executeUpdate();
-			if (result != 1) {
-				throw new RuntimeException("Failed to update record into " + tableName + " table");
-			}
+			return ps.executeUpdate();
 			
 		} catch (SQLException e) {
 			throw new RuntimeException(e);
@@ -150,7 +144,7 @@ public class Template<M> {
 		}
 	}
 
-	public void update(M m, Connection conn, String cond, Object... params) {
+	public int update(M m, Connection conn, String cond, Object... params) {
 		PreparedStatement ps = null;
 		try {
 			List<Field1<M>> fields = allFields();
@@ -158,10 +152,7 @@ public class Template<M> {
 			psSet1(fields, m, ps);
 			SQLUtil.psSet(params, ps, fields.size() + 1);
 
-			int result = ps.executeUpdate();
-			if (result != 1) {
-				throw new RuntimeException("Failed to update record into " + tableName + " table");
-			}
+			return ps.executeUpdate();
 			
 		} catch (SQLException e) {
 			throw new RuntimeException(e);
@@ -181,11 +172,13 @@ public class Template<M> {
 	public M select(Connection conn, String query, Object... params) {
 		Query<M> parseQuery = parseSelectQuery(query);
 		
-		AtomicReference<M> ret = new AtomicReference<M>();
-		each((F1<M, Boolean>) m -> {
-			ret.set(m);
-			return true;
-		}, conn, parseQuery.fields, (parseQuery.cond != null ? parseQuery.cond : "") + " LIMIT 1", params);
+		AtomicReference<M> ret = new AtomicReference<>();
+		
+		F1<M, Boolean> f1 = Fs.f1(Fs.setter(ret), true);
+		
+		String cond = (parseQuery.cond != null ? parseQuery.cond : "") + " LIMIT 1";
+		
+		each(f1, conn, parseQuery.fields, cond, params);
 		return ret.get();
 	}
 
@@ -213,8 +206,9 @@ public class Template<M> {
 			String cond, Object... params) {
 		PreparedStatement ps = null;
 		ResultSet rs = null;
+		String sql = "SELECT " + fieldNames(fields) + " FROM `" + tableName + "`" + (cond == null ? "" : " " + cond);
 		try {
-			ps = conn.prepareStatement("SELECT " + fieldNames(fields) + " FROM `" + tableName + "`" + (cond == null ? "" : " " + cond));
+			ps = conn.prepareStatement(sql);
 			SQLUtil.psSet1(params, ps);
 			rs = ps.executeQuery();
 			
@@ -227,7 +221,7 @@ public class Template<M> {
 			}
 			
 		} catch (SQLException e) {
-			throw new RuntimeException(e);
+			throw new RuntimeException("sql=" + sql, e);
 		} finally {
 			IOUtil.close(rs);
 			IOUtil.close(ps);
@@ -255,16 +249,19 @@ public class Template<M> {
 	}
 	
 	private Query<M> parseSelectQuery(String query) {
+		if (query == null) {
+			return new Query<>(allFields(), null);
+		}
 		Matcher matcher = RegexUtil.matcher("^(?i)(?:SELECT (.+?) *)?(?:FROM .+? *)?(WHERE .+)?$", query);
 		if (!matcher.matches()) {
 			throw new RuntimeException("Can not parse this query: " + query);
 		}
 		
-		return new Query<M>(parseFields(matcher.group(1)), matcher.group(2));
+		return new Query<>(parseFields(matcher.group(1)), matcher.group(2));
 	}
 	
 	public static void main(String[] args) {
-		new Template<Aa>(Aa.class).parseSelectQuery("SELECT receiver_name, receiver_address, receiver_phone WHERE order_by=? AND deliver_time > ? ORDER BY deliver_time DESC");
+		new Template<>(Aa.class).parseSelectQuery("SELECT receiver_name, receiver_address, receiver_phone WHERE order_by=? AND deliver_time > ? ORDER BY deliver_time DESC");
 	}
 
 	private List<Field1<M>> parseFields(String fields) {
@@ -323,10 +320,18 @@ public class Template<M> {
 	public void save(M m, Connection conn) {
 		Object id = getId(m);
 		if (id != null) {
-			update(m, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
+			int result = update(m, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
+			if (result != 1) {
+				throw new RuntimeException("Failed to update record into " + tableName + " table");
+			}
+
 		} else {
 			insert(m, conn);
 		}
+	}
+	
+	public void each(P1<M> p1, Connection conn) {
+		each(p1, conn, null);
 	}
 
 	public void each(P1<M> p1, Connection conn,
@@ -341,7 +346,10 @@ public class Template<M> {
 	}
 
 	public void update(M m, Connection conn) {
-		update(m, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
+		int result = update(m, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
+		if (result != 1) {
+			throw new RuntimeException("Failed to update record into " + tableName + " table");
+		}
 	}
 
 	public void delete(M m, Connection conn) {

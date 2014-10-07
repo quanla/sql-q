@@ -11,7 +11,7 @@ import qj.tool.sql.test.Aa.Food;
 
 public class UserDB {
 	static Template<Aa> template = Template.builder(Aa.class)
-				.embededList("foods", Food.class)
+				.embeded("foods")
 				.build();
 	
 	public static void insert(Aa user, Connection conn) {
@@ -56,6 +56,7 @@ public class UserDB {
 		
 	}
 
+	@SuppressWarnings("UnusedDeclaration")
 	private static void testDelete(long id, Connection conn) {
 		UserDB.delete(id, conn);
 	}
@@ -72,6 +73,7 @@ public class UserDB {
 	}
 	
 //	@SuppressWarnings("unused")
+	@SuppressWarnings("UnusedDeclaration")
 	private static void testUpdate(Connection conn) {
 		Aa user = UserDB.select(3L, conn);
 		user.age = 33;

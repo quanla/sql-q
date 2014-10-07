@@ -1,21 +1,6 @@
 package qj.tool.sql;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
-import java.math.BigDecimal;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-
+import com.google.gson.Gson;
 import qj.tool.sql.Template.Field1;
 import qj.util.Cols;
 import qj.util.NameCaseUtil;
@@ -25,7 +10,13 @@ import qj.util.funct.F1;
 import qj.util.funct.F2;
 import qj.util.funct.P1;
 
-import com.google.gson.Gson;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Type;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.*;
 
 public class Builder<M> {
 
@@ -44,9 +35,9 @@ public class Builder<M> {
 		return this;
 	}
 
-	HashSet<String> dontStore = new HashSet<String>();
+	HashSet<String> dontStore = new HashSet<>();
 	public Template<M> build() {
-		Template<M> template = new Template<M>(clazz);
+		Template<M> template = new Template<>(clazz);
 		template.idFields = Cols.yield(idFields, (fName) -> field1(ReflectUtil.getField(fName, clazz)));
 		template.dataFields = new LinkedList<>();
 		template.tableName = tableName;
@@ -60,6 +51,7 @@ public class Builder<M> {
 		return template;
 	}
 	
+	@SuppressWarnings("UnusedDeclaration")
 	public Builder<M> noId() {
 		idFields = Collections.emptyList();
 		return this;
@@ -94,7 +86,7 @@ public class Builder<M> {
 				return ReflectUtil.getFieldValue(field, m);
 			}
 		};
-		field1.type = field.getType();
+		field1.type = field.getGenericType();
 		field1.sqlName = NameCaseUtil.camelToHyphen(field.getName());
 		field1.psSetter = SQLUtil.setter(field.getType());
 		field1.rsGet = rsGet(field.getType());
@@ -102,92 +94,43 @@ public class Builder<M> {
 	}
 
 	Map<String,F1<Field1<M>,Field1<M>>> fieldDecors = new HashMap<>();
-	public Builder<M> embededList(String fieldName, Class<?> elemCLass) {
-		fieldDecors.put(fieldName, new F1<Field1<M>, Field1<M>>() {
-			@Override
-			public Field1<M> e(Field1<M> f1) {
-				Field1<M> newField1 = new Field1<M>() {
-					@Override
-					void setValue(Object val, M m) {
-						if (val == null || "null".equals(val)) {
-							f1.setValue(null, m);
-							return;
-						}
-						Object o = new Gson().fromJson(((String)val), ReflectUtil.forName("[L" + elemCLass.getName() + ";", elemCLass.getClassLoader()));
-						f1.setValue(ReflectUtil.invokeMethod("asList", new Object[] {o}, Arrays.class), m);
-					}
 
-					@Override
-					Object getValue(M m) {
-						Object val = f1.getValue(m);
-						return new Gson().toJson(val);
+	private Builder<M> embeded(String fieldName, F1<Field1<M>,Type> convertTypeF,
+			F1<Object, Object> afterDeserialized) {
+		fieldDecors.put(fieldName, f1 -> {
+			Field1<M> newField1 = new Field1<M>() {
+				@Override
+				void setValue(Object val, M m) {
+					if (val == null || "null".equals(val)) {
+						f1.setValue(null, m);
+						return;
 					}
-				};
-				newField1.psSetter = SQLUtil.setter(String.class);
-				newField1.rsGet = rsGet(String.class);
-				newField1.sqlName = f1.sqlName;
-				return newField1;
-			}
+					Object o = new Gson().fromJson(((String)val), convertTypeF.e(f1));
+
+					Object value = afterDeserialized==null ? o : afterDeserialized.e(o);
+
+					f1.setValue(value, m);
+				}
+
+				@Override
+				Object getValue(M m) {
+					Object val = f1.getValue(m);
+					return new Gson().toJson(val);
+				}
+			};
+			newField1.psSetter = SQLUtil.setter(String.class);
+			newField1.rsGet = rsGet(String.class);
+			newField1.sqlName = f1.sqlName;
+			return newField1;
 		});
 		return this;
 	}
+	
 	public Builder<M> embeded(String fieldName) {
-		fieldDecors.put(fieldName, (f1) -> {
-			Field1<M> newField1 = new Field1<M>() {
-				@Override
-				void setValue(Object val, M m) {
-					if (val == null) {
-						f1.setValue(null, m);
-						return;
-					}
-					Object o = new Gson().fromJson(((String)val), f1.type);
-					f1.setValue(o, m);
-				}
-
-				@Override
-				Object getValue(M m) {
-					Object val = f1.getValue(m);
-					return new Gson().toJson(val);
-				}
-			};
-			newField1.psSetter = SQLUtil.setter(String.class);
-			newField1.rsGet = rsGet(String.class);
-			newField1.sqlName = f1.sqlName;
-			return newField1;
-		});
-		return this;
-	}
-	public Builder<M> embededMapBD(String fieldName) {
-		fieldDecors.put(fieldName, (f1) -> {
-			Field1<M> newField1 = new Field1<M>() {
-				@Override
-				void setValue(Object val, M m) {
-					if (val == null) {
-						f1.setValue(null, m);
-						return;
-					}
-					Map o = new Gson().fromJson(((String)val), Map.class);
-					for (Object oe : o.entrySet()) {
-						Entry e = (Entry)oe;
-						o.put(e.getKey(), BigDecimal.valueOf((Double)e.getValue()));
-					}
-					f1.setValue(o, m);
-				}
-
-				@Override
-				Object getValue(M m) {
-					Object val = f1.getValue(m);
-					return new Gson().toJson(val);
-				}
-			};
-			newField1.psSetter = SQLUtil.setter(String.class);
-			newField1.rsGet = rsGet(String.class);
-			newField1.sqlName = f1.sqlName;
-			return newField1;
-		});
-		return this;
+		return embeded(fieldName, (f1) -> f1.type, null);
 	}
 
+	@SuppressWarnings("UnusedDeclaration")
 	public Builder<M> dontStore(String fieldName) {
 		dontStore.add(fieldName);
 		return this;
@@ -226,7 +169,7 @@ public class Builder<M> {
 		Method methodWasNull = ReflectUtil.getMethod("wasNull", ResultSet.class);
 		Method methodGet = ReflectUtil.getMethod(rsGetMethodName(type), new Class[] {int.class}, ResultSet.class);
 		return (rs, index) -> {
-			Object val = ReflectUtil.invoke(methodGet, rs, new Object[] {index});
+			Object val = ReflectUtil.invoke(methodGet, rs, index);
 			Boolean wasNull = ReflectUtil.invoke(methodWasNull, rs);
 			
 			return wasNull ? null : val;
