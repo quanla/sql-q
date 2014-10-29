@@ -23,6 +23,7 @@ import qj.util.funct.Fs;
 import qj.util.funct.P1;
 import qj.util.funct.P3;
 
+@SuppressWarnings("UnusedDeclaration")
 public class Template<M> {
 	Class<M> clazz;
 	List<Field1<M>> idFields;
@@ -166,6 +167,9 @@ public class Template<M> {
 	}
 	
 	public M selectById(Object id, Connection conn) {
+		if (id == null) {
+			return null;
+		}
 		return select(conn, "WHERE `" + Cols.getSingle(idFields).sqlName + "`=?", id);
 	}
 

@@ -14,6 +14,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
+import java.sql.Blob;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.*;
@@ -160,6 +161,16 @@ public class Builder<M> {
 			return (rs, index) -> {
 				try {
 					return rs.getTimestamp(index);
+				} catch (SQLException e) {
+					throw new RuntimeException(e);
+				}
+			};
+		}
+		if (type.equals(byte[].class)) {
+			return (rs, index) -> {
+				try {
+					Blob blob = rs.getBlob(index);
+					return blob.getBytes(1, (int) blob.length());
 				} catch (SQLException e) {
 					throw new RuntimeException(e);
 				}
