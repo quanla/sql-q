@@ -95,6 +95,9 @@ public class SQLUtil {
 	}
 	static int psSet(Object[] params, PreparedStatement ps, int index)
 			throws SQLException {
+		if (params == null) {
+			return index;
+		}
 		for (Object val : params) {
 			if (val == null) {
 				ps.setNull(index++, Types.INTEGER);

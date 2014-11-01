@@ -28,11 +28,17 @@ public class Builder<M> {
 
 	public Builder(Class<M> clazz) {
 		this.clazz = clazz;
-		tableName = clazz.getSimpleName().toLowerCase();
+		
+		tableName = NameCaseUtil.camelToHyphen(clazz.getSimpleName());
 	}
 
-	public Builder<M> id(String idField) {
-		idFields = Arrays.asList(idField);
+	public static void main(String[] args) {
+		System.out.println(NameCaseUtil.camelToHyphen("ChatLastRead"));
+	}
+	
+
+	public Builder<M> id(String... idFields) {
+		this.idFields = Arrays.asList(idFields);
 		return this;
 	}
 

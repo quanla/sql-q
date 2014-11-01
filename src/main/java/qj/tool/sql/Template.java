@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -80,6 +81,36 @@ public class Template<M> {
 			IOUtil.close(ps);
 		}
 	}
+	
+	
+	public void insert(Collection<M> col, Connection conn) {
+		if (Cols.isEmpty(col)) {
+			return;
+		}
+		
+		List<Field1<M>> fields = allFields();
+
+		PreparedStatement ps = null;
+		try {
+			String sql = "INSERT INTO `" + tableName + "`(" + fieldNames(fields) + ") VALUES(" + fieldsPH(fields) + ")";
+//			System.out.println(sql);
+			ps = conn.prepareStatement(sql, Cols.isEmpty(idFields) ? Statement.NO_GENERATED_KEYS : Statement.RETURN_GENERATED_KEYS); // new String[] {"id"}
+
+			for (M m : col) {
+				psSet1(fields, m, ps);
+				ps.addBatch();
+			}
+			ps.executeBatch();
+		} catch (SQLException e) {
+			throw new RuntimeException(e);
+		} finally {
+			IOUtil.close(ps);
+		}
+//		PreparedStatement ps = conn.prepareStatement("");
+//		ps.execute
+
+	}
+
 
 	private void setId(M m, long id) {
 		Cols.getSingle(idFields).setValue(id, m);
@@ -189,11 +220,11 @@ public class Template<M> {
 	public List<M> selectAll(Connection conn) {
 		List<Field1<M>> fields = allFields();
 		String cond = "";
-		return selectList(conn, fields, cond);
+		return selectList(conn, fields, cond, null);
 	}
 
 	private List<M> selectList(Connection conn, List<Field1<M>> fields,
-			String cond, Object... params) {
+	                           String cond, Object[] params) {
 		LinkedList<M> list = new LinkedList<>();
 		
 		each(Fs.store(list), conn, fields, cond, params);
@@ -202,12 +233,12 @@ public class Template<M> {
 	}
 	
 	private void each(P1<M> p1, Connection conn, List<Field1<M>> fields,
-			String cond, Object... params) {
+			String cond, Object[] params) {
 		each(Fs.f1(p1, false), conn, fields, cond, params);
 	}
 
 	private void each(F1<M,Boolean> f1, Connection conn, List<Field1<M>> fields,
-			String cond, Object... params) {
+			String cond, Object[] params) {
 		PreparedStatement ps = null;
 		ResultSet rs = null;
 		String sql = "SELECT " + fieldNames(fields) + " FROM `" + tableName + "`" + (cond == null ? "" : " " + cond);
@@ -256,7 +287,7 @@ public class Template<M> {
 		if (query == null) {
 			return new Query<>(allFields(), null);
 		}
-		Matcher matcher = RegexUtil.matcher("^(?i)(?:SELECT (.+?) *)?(?:FROM .+? *)?(WHERE .+)?$", query);
+		Matcher matcher = RegexUtil.matcher("^(?i)(?:SELECT (.+?) *)?(?:FROM .+? *)?((?:WHERE .+)?(?:ORDER BY .+)?)$", query);
 		if (!matcher.matches()) {
 			throw new RuntimeException("Can not parse this query: " + query);
 		}
@@ -296,6 +327,7 @@ public class Template<M> {
 	static class Query<M> {
 		List<Field1<M>> fields;
 		String cond;
+
 		public Query(List<Field1<M>> fields, String cond) {
 			this.fields = fields;
 			this.cond = cond;
