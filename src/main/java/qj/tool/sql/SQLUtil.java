@@ -19,9 +19,11 @@ public class SQLUtil {
 			conn.setAutoCommit(false);
 			run.e();
 			conn.commit();
+			conn.setAutoCommit(true);
 		} catch (SQLException e) {
 			try {
 				conn.rollback();
+				conn.setAutoCommit(true);
 			} catch (SQLException ignored) {
 			}
 			throw new RuntimeException(e);
@@ -61,7 +63,11 @@ public class SQLUtil {
 		if (type.equals(Date.class)) {
 			return (ps, index, val) -> {
 				try {
-					ps.setTimestamp(index, new Timestamp(((Date)val).getTime()));
+					if (val==null) {
+						ps.setNull(index, Types.DATE);
+					} else {
+						ps.setTimestamp(index, new Timestamp(((Date)val).getTime()));
+					}
 				} catch (SQLException e) {
 					throw new RuntimeException(e);
 				}
@@ -90,7 +96,16 @@ public class SQLUtil {
 			return null;
 		}
 		return (ps, index, val) -> {
-			ReflectUtil.invoke(method, ps, index, val);
+			
+			if (val==null) {
+				try {
+					ps.setNull(index, Types.VARCHAR);
+				} catch (SQLException e) {
+					throw new RuntimeException(e);
+				}
+			} else {
+				ReflectUtil.invoke(method, ps, index, val);
+			}
 		};
 	}
 	static int psSet(Object[] params, PreparedStatement ps, int index)

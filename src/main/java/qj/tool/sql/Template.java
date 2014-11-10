@@ -399,4 +399,8 @@ public class Template<M> {
 	public void deleteAll(Connection conn) {
 		delete(conn, null);
 	}
+	
+	public String tableName() {
+		return tableName;
+	}
 }
