@@ -91,7 +91,8 @@ public class SQLUtil {
 				}
 			};
 		}
-		Method method = ReflectUtil.getMethod("set" + StringUtil.upperCaseFirstChar(type.getSimpleName()), PreparedStatement.class);
+		String methodName = "set" + StringUtil.upperCaseFirstChar(type.getSimpleName());
+		Method method = ReflectUtil.findMethod(PreparedStatement.class, (m) -> m.getName().equals(methodName) && m.getParameterCount() == 2);
 		if (method == null) {
 			return null;
 		}
@@ -104,6 +105,7 @@ public class SQLUtil {
 					throw new RuntimeException(e);
 				}
 			} else {
+//				System.out.println(method.getName());
 				ReflectUtil.invoke(method, ps, index, val);
 			}
 		};

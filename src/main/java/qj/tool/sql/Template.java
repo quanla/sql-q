@@ -7,6 +7,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
@@ -50,7 +51,7 @@ public class Template<M> {
 		return new Builder<>(clazz);
 	}
 
-	public void insert(M m, Connection conn) {
+	public M insert(M m, Connection conn) {
 
 		boolean hasId = getId(m) != null;
 		List<Field1<M>> fields = hasId ? allFields() : dataFields;
@@ -73,6 +74,8 @@ public class Template<M> {
 					setId(m, rs.getLong(1));
 				}
 			}
+			
+			return m;
 			
 		} catch (SQLException e) {
 			throw new RuntimeException(e);
@@ -177,9 +180,12 @@ public class Template<M> {
 	}
 
 	public int update(M m, Connection conn, String cond, Object... params) {
+		return update(m, allFields(), conn, cond, params);
+	}
+
+	public int update(M m, List<Field1<M>> fields, Connection conn, String cond, Object... params) {
 		PreparedStatement ps = null;
 		try {
-			List<Field1<M>> fields = allFields();
 			ps = conn.prepareStatement("UPDATE `" + tableName + "` SET " + psSetUpdate(fields) + " " + cond);
 			psSet1(fields, m, ps);
 			SQLUtil.psSet(params, ps, fields.size() + 1);
@@ -256,7 +262,7 @@ public class Template<M> {
 			}
 			
 		} catch (SQLException e) {
-			throw new RuntimeException("sql=" + sql, e);
+			throw new RuntimeException(e + ", sql=" + sql, e);
 		} finally {
 			IOUtil.close(rs);
 			IOUtil.close(ps);
@@ -356,7 +362,7 @@ public class Template<M> {
 	public void save(M m, Connection conn) {
 		Object id = getId(m);
 		if (id != null) {
-			int result = update(m, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
+			int result = update(m, allFields(), conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", id);
 			if (result != 1) {
 				throw new RuntimeException("Failed to update record into " + tableName + " table");
 			}
@@ -382,7 +388,19 @@ public class Template<M> {
 	}
 
 	public void update(M m, Connection conn) {
-		int result = update(m, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
+		int result = update(m, allFields(), conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
+		if (result != 1) {
+			throw new RuntimeException("Failed to update record into " + tableName + " table");
+		}
+	}
+
+	/**
+	 * 
+	 * @param fields SET name, age
+	 */
+	public void update(M m, String fields, Connection conn) {
+		List<Field1<M>> fields1 = Cols.yield(Arrays.asList(fields.replaceFirst("(?i)^SET ","").split(",\\s*")), this::getField);
+		int result = update(m, fields1, conn, "WHERE " + Cols.getSingle(idFields).sqlName + "=?", getId(m));
 		if (result != 1) {
 			throw new RuntimeException("Failed to update record into " + tableName + " table");
 		}
