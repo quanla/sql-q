@@ -18,15 +18,6 @@
     <orderEntry type="inheritedJdk" />
     <orderEntry type="module" module-name="quan-util-core" />
     <orderEntry type="module-library">
-      <library name="mysql-connector-java-5.1.31-bin.jar">
-        <CLASSES>
-          <root url="jar://E:/Store/Setup/Java/mysql-connector-java-5.1.31-bin.jar!/" />
-        </CLASSES>
-        <JAVADOC />
-        <SOURCES />
-      </library>
-    </orderEntry>
-    <orderEntry type="module-library">
       <library name="gson-2.2.4.jar">
         <CLASSES>
           <root url="jar://$MODULE_DIR$/../../app/app-common/data/lib/gson-2.2.4.jar!/" />
@@ -37,4 +28,3 @@
     </orderEntry>
   </component>
 </module>
-
