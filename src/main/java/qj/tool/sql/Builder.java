@@ -45,7 +45,13 @@ public class Builder<M> {
 	HashSet<String> dontStore = new HashSet<>();
 	public Template<M> build() {
 		Template<M> template = new Template<>(clazz);
-		template.idFields = Cols.yield(idFields, (fName) -> field1(ReflectUtil.getField(fName, clazz)));
+		template.idFields = Cols.yield(idFields, (fName) -> {
+			Field field = ReflectUtil.getField(fName, clazz);
+			if (field == null) {
+				throw new RuntimeException("IdField " + clazz.getName() + "." + fName + " does not exists");
+			}
+			return field1(field);
+		});
 		template.dataFields = new LinkedList<>();
 		template.tableName = tableName;
 		template.autoIncrement = autoIncrement;
